@@ -1,6 +1,12 @@
 import json
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
+from telegram.error import BadRequest
+import logging
+
+# লগিং সেটআপ করুন
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
 
 # আপনার ব্যক্তিগত টোকেন এবং আইডি এখানে দিন।
 BOT_TOKEN = "7845699149:AAEEKpzHFt5gd6LbApfXSsE8de64f8IaGx0"
@@ -9,21 +15,25 @@ PUBLIC_CHANNEL_ID = -1003036699455  # পাবলিক আপডেটের �
 
 # --- ডাটাবেস হ্যান্ডলার ---
 def load_data(file_name):
+    """JSON ফাইল থেকে ডেটা লোড করে।"""
     try:
         with open(file_name, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 def save_data(data, file_name):
+    """ডেটা JSON ফাইলে সংরক্ষণ করে।"""
     with open(file_name, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 # --- কমান্ড হ্যান্ডলার ---
 def start(update: Update, context: CallbackContext) -> None:
+    """বট শুরু হলে এই কমান্ডটি কাজ করে।"""
     update.message.reply_text('স্বাগতম! আমি আপনার ইউজার এজেন্ট বট। /help লিখে কমান্ডগুলো দেখতে পারেন।')
 
 def help_command(update: Update, context: CallbackContext) -> None:
+    """সহায়তা কমান্ড।"""
     update.message.reply_text(
         """
         কমান্ডসমূহ:
@@ -35,6 +45,7 @@ def help_command(update: Update, context: CallbackContext) -> None:
     )
 
 def rules_command(update: Update, context: CallbackContext) -> None:
+    """নিয়মাবলী দেখানোর জন্য কমান্ড।"""
     update.message.reply_text(
         """
         বট ব্যবহারের নিয়মাবলী:
@@ -46,12 +57,14 @@ def rules_command(update: Update, context: CallbackContext) -> None:
 
 # --- ব্যালেন্স এবং টপ-আপ ---
 def my_balance(update: Update, context: CallbackContext) -> None:
+    """ব্যবহারকারীর ব্যালেন্স দেখায়।"""
     user_id = str(update.effective_user.id)
     user_data = load_data('user_data.json')
     balance = user_data.get(user_id, {}).get('balance', 0)
     update.message.reply_text(f"আপনার বর্তমান ব্যালেন্স: ${balance:.2f}")
 
 def top_up(update: Update, context: CallbackContext) -> None:
+    """টপ-আপ রিকোয়েস্ট পাঠায়।"""
     try:
         if len(context.args) < 2:
             update.message.reply_text("ব্যবহারের নিয়ম: /topup [টাকার পরিমাণ] [ট্রানজ্যাকশন আইডি]")
@@ -64,7 +77,7 @@ def top_up(update: Update, context: CallbackContext) -> None:
         message = (
             f"💰 **নতুন টপ-আপ রিকোয়েস্ট!**\n\n"
             f"**ইউজার আইডি:** `{user.id}`\n"
-            f"**ইউজারনেম:** @{user.username}\n"
+            f"**ইউজারনেম:** @{user.username or 'N/A'}\n"
             f"**পরিমাণ:** ${amount:.2f}\n"
             f"**ট্রানজ্যাকশন আইডি:** `{transaction_id}`\n\n"
             "আপনি কি এই রিকোয়েস্টটি গ্রহণ করতে চান?"
@@ -92,6 +105,7 @@ def top_up(update: Update, context: CallbackContext) -> None:
 
 # --- ইউজার এজেন্ট লোড এবং সরবরাহ ---
 def buy_user_agent(update: Update, context: CallbackContext) -> None:
+    """ইউজার এজেন্ট বিক্রি করে।"""
     price = 10  # একটি ইউজার এজেন্টের দাম
     user_id = str(update.effective_user.id)
     user_data = load_data('user_data.json')
@@ -128,13 +142,17 @@ def buy_user_agent(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(f"আপনার ইউজার এজেন্টটি:\n\n`{ua_to_sell['user_agent']}`\n\n"
                               f"আপনার নতুন ব্যালেন্স: ${user_data[user_id]['balance']:.2f}")
     
-    context.bot.send_message(
-        chat_id=PUBLIC_CHANNEL_ID,
-        text=f"🥳 একজন ব্যবহারকারী সফলভাবে একটি ইউজার এজেন্ট কিনেছেন! নতুন স্টক আসছে..."
-    )
+    try:
+        context.bot.send_message(
+            chat_id=PUBLIC_CHANNEL_ID,
+            text=f"🥳 একজন ব্যবহারকারী সফলভাবে একটি ইউজার এজেন্ট কিনেছেন! নতুন স্টক আসছে..."
+        )
+    except BadRequest:
+        logging.error("পাবলিক চ্যানেলে মেসেজ পাঠাতে সমস্যা হয়েছে। নিশ্চিত করুন যে বটটি চ্যানেলের অ্যাডমিন এবং মেসেজ পাঠানোর অনুমতি আছে।")
 
 # --- অ্যাডমিন বাটন হ্যান্ডলার ---
 def button_callback(update: Update, context: CallbackContext) -> None:
+    """অ্যাডমিন চ্যানেলের বাটনগুলো পরিচালনা করে।"""
     query = update.callback_query
     query.answer()
     
@@ -153,34 +171,46 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         user_data[user_id]['balance'] += amount
         save_data(user_data, 'user_data.json')
         
-        # ব্যবহারকারীকে নোটিফিকেশন পাঠান
-        context.bot.send_message(
-            chat_id=user_id,
-            text=f"✅ আপনার টপ-আপ সফল হয়েছে! আপনার অ্যাকাউন্টে ${amount:.2f} যোগ করা হয়েছে।"
-        )
-        
-        query.edit_message_text(f"এই রিকোয়েস্টটি গ্রহণ করা হয়েছে।")
+        try:
+            # ব্যবহারকারীকে নোটিফিকেশন পাঠান
+            context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ আপনার টপ-আপ সফল হয়েছে! আপনার অ্যাকাউন্টে ${amount:.2f} যোগ করা হয়েছে।"
+            )
+            query.edit_message_text(f"এই রিকোয়েস্টটি গ্রহণ করা হয়েছে।")
+        except BadRequest:
+            query.edit_message_text("ব্যবহারকারীকে মেসেজ পাঠানো যায়নি।")
+            logging.error(f"ইউজার ID {user_id} কে মেসেজ পাঠানো যায়নি।")
 
     elif action == 'reject':
-        context.bot.send_message(
-            chat_id=user_id,
-            text=f"❌ দুঃখিত, আপনার টপ-আপ রিকোয়েস্টটি বাতিল করা হয়েছে। কোনো সমস্যা হলে সাপোর্টে যোগাযোগ করুন।"
-        )
-        query.edit_message_text(f"এই রিকোয়েস্টটি বাতিল করা হয়েছে।")
+        try:
+            context.bot.send_message(
+                chat_id=user_id,
+                text=f"❌ দুঃখিত, আপনার টপ-আপ রিকোয়েস্টটি বাতিল করা হয়েছে। কোনো সমস্যা হলে সাপোর্টে যোগাযোগ করুন।"
+            )
+            query.edit_message_text(f"এই রিকোয়েস্টটি বাতিল করা হয়েছে।")
+        except BadRequest:
+            query.edit_message_text("ব্যবহারকারীকে মেসেজ পাঠানো যায়নি।")
+            logging.error(f"ইউজার ID {user_id} কে মেসেজ পাঠানো যায়নি।")
 
 # --- প্রধান ফাংশন ---
 def main() -> None:
+    """বটের প্রধান প্রবেশ বিন্দু।"""
     updater = Updater(BOT_TOKEN)
     dispatcher = updater.dispatcher
 
+    # কমান্ড হ্যান্ডলার যুক্ত করুন
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("rules", rules_command))
     dispatcher.add_handler(CommandHandler("mybalance", my_balance))
     dispatcher.add_handler(CommandHandler("topup", top_up))
     dispatcher.add_handler(CommandHandler("buyua", buy_user_agent))
+    
+    # বাটন হ্যান্ডলার যুক্ত করুন
     dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
+    # পোলিং শুরু করুন
     updater.start_polling()
     updater.idle()
 
